@@ -1,0 +1,697 @@
+---
+title: "House Price Index Analysis"
+author: "Hong Shi"
+format: pdf
+editor: visual
+---
+
+# Project Description: House Price Index Analysis
+
+## 1. Introduction:
+
+The House Price Index (HPI) is a critical economic indicator that provides insights into the
+
+movement of single-family house prices. The HPI is essential for understanding the real estate
+
+market's health and its impact on the overall economy. In this project, our team aims to analyze
+
+the HPI dataset provided by the Federal Housing Finance Agency (FHFA) to answer several
+
+important questions and generate valuable insights. The project team consists of four members:
+
+Sushwanth, Hong Shi, Pravalika, and Harshini, are each responsible for specific tasks in the analysis
+
+process.
+
+## 2. Data Sources:
+
+We will primarily utilize data from the FHFA House Price Index datasets, accessible through APIs at the following link: FHFA House Price Index Datasets. This dataset offers monthly and quarterly time series data from January 1991 to August 2016 across various geographical classifications, including the U.S., state, and MSA levels. The main variables for our analysis are aggregate non-seasonally adjusted values and seasonally adjusted index values, with the index starting at 100 in January 1991 to track price changes over time.
+
+To provide a richer context to our analysis, we will augment our primary dataset with unemployment rate data on the state or MSA levels. This unemployment data will be sourced from the Bureau of Labor Statistics (BLS) via the BLS Local Area Unemployment Statistics. Incorporating this data will allow us to analyze house price variations about unemployment trends, offering a more comprehensive understanding of the housing market dynamics.
+
+## 3. Data Preprocessing and Data Cleaning
+
+```{r setup, include=FALSE}
+#| message: false
+# Set CRAN mirror
+options(repos = c(CRAN = "https://cran.rstudio.com/"))
+```
+
+```{r,  warning=FALSE}
+#| message: false
+
+# load neccessary libraries
+install.packages("xts")
+install.packages('zoo')
+install.packages("caret") # Random Forest
+install.packages("keras") # Neural Network
+install.packages("tensorflow") 
+install.packages("e1071")# SVM
+library(e1071)
+library(keras)
+library(caret)
+library(readxl)
+library(tidyverse)
+library(dplyr)
+library(xts)
+library(zoo)
+library(ggplot2)
+library(tensorflow)
+```
+
+```{r}
+# read datasets
+hpi <- read_excel("C:/Users/Laura/Documents/Data Science/UoM/Data Mining/project/Final project/HPI_PO_state.xls")
+
+```
+
+```{r}
+dim(hpi)
+summary(hpi)
+```
+
+```{r}
+#replacing 'yr' and 'qtr' in 'Year' and 'Quarter' columns
+hpi$Year<- as.numeric(hpi$yr)
+hpi$Quarter<- as.numeric(hpi$qtr)
+hpi$State<- as.character(hpi$state)
+# delete the columns 'yr' and 'qtr'
+hpi <- hpi %>% 
+  select ( -c('yr', 'qtr','state'))
+
+head(hpi)
+
+```
+
+```{r}
+# read US unemployment Rate data
+
+unRate<- read_csv("C:/Users/Laura/Documents/Data Science/UoM/Data Mining/project/Final project/unRate.csv",col_types = cols(
+  Month = col_character(),
+  State = col_character(),
+  Year = col_double(),
+  Rate = col_double()))
+
+```
+
+```{r}
+head(unRate)
+```
+
+```{r}
+
+# Create a mapping from month names to quarters
+month_to_quarter_mapping <- c(
+  "January" = 1, "February" = 1, "March" = 1,
+  "April" = 2, "May" = 2, "June" = 2,
+  "July" = 3, "August" = 3, "September" = 3,
+  "October" = 4, "November" = 4, "December" = 4
+)
+
+# Replace English month names with numbers
+unRate <- unRate %>%
+  mutate(
+    Quarter = recode(Month, !!!month_to_quarter_mapping)
+  )
+
+head(unRate)
+dim(unRate)
+summary(unRate)
+
+```
+
+```{r}
+
+# Use the built-in state.abb vector to get the state abbreviations
+state_abbreviations <- toupper(state.abb)
+
+unRate <- unRate %>%
+  mutate(
+    State = recode(State, !!!set_names(state_abbreviations, state.name))
+  )
+
+head(unRate)
+
+```
+
+```{r}
+# Calculate the mean unemployment rate for each state and quarter
+summary_unemployment <- unRate %>%
+  group_by(Year,State, Quarter) %>%
+  summarise(UnEmploymentRate = mean(Rate))
+
+# Merge the summarization result back into the original data frame
+unRate <- left_join(unRate, summary_unemployment, by = c("Year","State", "Quarter"))
+
+# Print the result
+head(unRate)
+
+```
+
+```{r}
+# delete duplicate records of unemployment and remove the 'Rate' column
+unRate <- unRate %>%
+  group_by(Year,State, Quarter) %>%
+  summarise(UnEmploymentRate = first(UnEmploymentRate)) %>%
+  ungroup()
+head(unRate)
+```
+
+```{r}
+dim(unRate)
+```
+
+```{r}
+# Merging previous 'hpi' and 'unemployment' datasets
+merged_unRate <- merge(hpi, unRate, by = c("Year", "Quarter","State"))
+head(merged_unRate)
+dim(merged_unRate)
+summary(merged_unRate)
+```
+
+```{r}
+# calculate the seasnoal variation
+merged_unRate$seasnoal_variation<- merged_unRate$index_sa/merged_unRate$index_nsa
+head(merged_unRate)
+```
+
+```{r}
+dim(merged_unRate)
+summary(merged_unRate)
+```
+
+```{r}
+# Saving the merged unemployment rate dataset to a CSV file
+write.csv(merged_unRate, "C:/Users/Laura/Documents/Data Science/UoM/Data Mining/project/HoursePriceIndexUnemploymentRate.csv", row.names = FALSE)
+head(merged_unRate)
+```
+
+## 4. Data Visualization and Analysis
+
+### 1. Data Visualization and Interpretation
+
+```{r}
+# group by the state
+state_unrate<- merged_unRate %>%
+  group_by(State)%>%
+  summarise(
+    state_unrate = mean(UnEmploymentRate),
+    sate_seasonal_variation = mean(seasnoal_variation),
+    state_index_sa = mean(index_sa),
+    state_index_nsa = mean(index_nsa)
+
+  )
+head(state_unrate)
+dim(state_unrate)
+
+```
+
+```{r}
+# visulaization the relationship bewteen state and unployment
+ggplot(state_unrate,aes(x=State,y=state_unrate,color = state_unrate))+
+  geom_point()+
+  scale_color_gradient(low = "grey", high = "black") + 
+  labs(
+    title = "the average unemployment of each state ",
+    xlab = " state",
+    ylab = "average unemployment rate"
+  )+
+  geom_hline(yintercept = 6, linetype = "dashed", color = "red") # assume the unemployment rate is bigger than 6 is heavy unemployment year
+
+```
+
+```{r}
+# visulaization the relationship bewteen state and seasonal variation
+ggplot(state_unrate,aes(x=State,y=sate_seasonal_variation,color = sate_seasonal_variation))+
+  geom_point()+
+  scale_color_gradient(low = "grey", high = "black") + 
+  labs(
+    title = "the average seasonal variation of each state ",
+    xlab = " state",
+    ylab = "seasonal variation"
+  )+
+  geom_hline(yintercept = 1, linetype = "dashed", color = "red") # when seasonal variation =1, which means, the seasonal factors don't impact the house price.
+  theme_minimal()
+```
+
+```{r}
+library(ggplot2)
+ggplot(state_unrate, aes(x = State)) +
+  geom_line(aes(y = state_unrate, color = "Unemployment Rate", group = 1), linewidth = 1) +
+  geom_line(aes(y = sate_seasonal_variation, color = "Seasonal Variation", group = 1), linewidth = 1) +
+  geom_line(aes(y = state_index_sa, color = "Index SA", group = 1), linewidth = 1) +
+  geom_line(aes(y = state_index_nsa, color = "Index NSA", group = 1), linewidth = 1) +
+  labs(
+    title = "Mean Values Across States",
+    x = "State",
+    y = "Mean Values"
+  ) +
+  scale_color_manual(values = c(
+    "Unemployment Rate" = "red",
+    "Seasonal Variation" = "blue",
+    "Index SA" = "green",
+    "Index NSA" = "yellow"
+  )) +
+  theme_minimal()
+
+
+```
+
+```{r}
+
+ggplot(state_unrate, aes(x = State)) +
+
+  geom_line(aes(y = state_index_sa, color = "Index SA", group = 1), linewidth = 1) +
+  geom_line(aes(y = state_index_nsa, color = "Index NSA", group = 1), linewidth = 1) +
+  labs(
+    title = "Index Values Across States",
+    x = "State",
+    y = "Index Values"
+  ) +
+  scale_color_manual(values = c(
+
+    "Index SA" = "green",
+    "Index NSA" = "yellow"
+  )) +
+  theme_minimal()
+```
+
+```{r}
+ggplot(state_unrate, aes(x = State)) +
+  geom_line(aes(y = state_unrate, color = "Unemployment Rate", group = 1), size = 1) +
+  geom_line(aes(y = sate_seasonal_variation, color = "Seasonal Variation", group = 1), size = 1) +
+  labs(
+    title = "Mean Values Across States",
+    x = "State",
+    y = "Mean Values"
+  ) +
+  scale_color_manual(values = c(
+    "Unemployment Rate" = "red",
+    "Seasonal Variation" = "blue"
+  )) +
+   geom_hline(yintercept = 6, linetype = "dashed", color = "grey")+
+  theme_minimal()
+
+```
+
+```{r}
+ggplot(state_unrate, aes(x = State)) +
+ 
+  geom_line(aes(y = sate_seasonal_variation, color = "Seasonal Variation", group = 1), size = 1) +
+  labs(
+    title = "Mean Seasonal Variation Across States",
+    x = "State",
+    y = "Mean Seasonal Variation"
+  ) +
+  scale_color_manual(values = c(
+    
+    "Seasonal Variation" = "blue"
+  )) +
+   geom_hline(yintercept = 1, linetype = "dashed", color = "grey")+
+  theme_minimal()
+```
+
+Based on the graph "Mean Seasonal Variation Across States", the Seasonal Variation is differed on vary locations. Some states house price is impacted by the season factors, but not the all.
+
+```{r}
+# Scatter plot of Unemployment Rate vs Index SA
+ggplot(state_unrate, aes(x = state_unrate)) +
+  geom_line(aes(y = state_index_sa, color = "Season Index"), size = 1) +
+  geom_line(aes(y = state_index_nsa, color = "Non-season Index"), size = 1) +
+  labs(
+    title = "Unemployment Rate VS index_sa, index_nsa(state)",
+    x = "Unemployment Rate",
+    y = "Values"
+  ) +
+  scale_color_manual(values = c(
+    "Season Index" = "orange",
+    "Non-season Index" = "grey"
+  )) +
+  theme_minimal()
+```
+
+```{r}
+# group by the year
+year_unrate<- merged_unRate %>%
+  group_by(Year)%>%
+  summarise(
+    year_unrate = mean(UnEmploymentRate),
+    year_seasonal_variation = mean(seasnoal_variation),
+    year_index_sa = mean(index_sa),
+    year_index_nsa = mean(index_nsa)
+
+  )
+head(year_unrate)
+dim(year_unrate)
+```
+
+```{r}
+ggplot(year_unrate,aes(x=Year))+
+  geom_line(aes(y = year_unrate, color = "unemployment rate"), size = 1) +
+  geom_line(aes(y = year_seasonal_variation, color = "seasonal variation"), size = 1) +
+  geom_line(aes(y = year_index_sa, color = "season index"), size = 1) +
+  geom_line(aes(y =year_index_nsa,color = 'non-season index'),size = 1)+
+  labs(
+    title = " The Tendency over Years",
+    x = "Year",
+    y = "Values"
+  )+
+   scale_color_manual(values = c("unemployment rate" = "red", "seasonal variation" = "blue", "season index" = "green","non-season index"= "yellow"))
+  
+  
+```
+
+```{r}
+ggplot(year_unrate,aes(x=Year))+
+
+  geom_line(aes(y = year_index_sa, color = "season index"), size = 1) +
+  geom_line(aes(y =year_index_nsa,color = 'non-season index'),size = 1)+
+  labs(
+    title = " Index value over Years",
+    x = "Year",
+    y = " Index Values"
+  )+
+   scale_color_manual(values = c(
+   
+     "season index" = "green",
+     "non-season index"= "yellow"))
+  
+```
+
+```{r}
+ggplot(year_unrate,aes(x=Year))+
+  geom_line(aes(y = year_unrate, color = "unemployment rate"), size = 1) +
+  geom_line(aes(y = year_seasonal_variation, color = "seasonal variation"), size = 1) +
+  labs(
+    title = "Unemployment Rate and Seasonal Variation Over Years",
+    x = "Year",
+    y = "Values"
+  )+
+   scale_color_manual(values = c("unemployment rate" = "red", "seasonal variation" = "blue"))+
+  geom_hline(yintercept = 6, linetype = "dashed", color = "grey")
+  
+
+```
+
+```{r}
+ggplot(year_unrate, aes(x = Year)) +
+  geom_line(aes(y = year_seasonal_variation, color = "seasonal variation"), size = 1) +
+  labs(
+    title = "Seasonal Variation Over Years",
+    x = "Year",
+    y = "seasonal variation"
+  ) +
+  scale_color_manual(values = c("seasonal variation" = "blue"))+
+  geom_hline(yintercept = 1, linetype = "dashed", color = "grey")
+
+```
+
+Based the graph "Seasonal Variation Over Years", the trend of the seasonal variation has fluctuated, but the dramatically, in the past few decades.
+
+```{r}
+# Scatter plot of Unemployment Rate vs Index SA
+ggplot(year_unrate, aes(x = year_unrate)) +
+  geom_line(aes(y = year_index_sa, color = "Season Index"), size = 1) +
+  geom_line(aes(y = year_index_nsa, color = "Non-season Index"), size = 1) +
+  labs(
+    title = "Unemployment Rate VS index_sa, index_nsa(year)",
+    x = "Unemployment Rate",
+    y = "Values"
+  ) +
+  scale_color_manual(values = c(
+    "Season Index" = "orange",
+    "Non-season Index" = "grey"
+  )) +
+  theme_minimal()
+```
+
+```{r}
+# group by the quarter
+quarter_unrate<- merged_unRate %>%
+  group_by(Quarter)%>%
+  summarise(
+    quarter_unrate = mean(UnEmploymentRate),
+    quarter_seasonal_variation = mean(seasnoal_variation),
+    quarter_index_sa = mean(index_sa),
+    quarter_index_nsa = mean(index_nsa)
+)
+quarter_unrate
+```
+
+```{r}
+ggplot(quarter_unrate, aes(x = Quarter)) +
+  geom_line(aes(y = quarter_unrate, color = "Unemployment Rate"), size = 1) +
+  geom_line(aes(y = quarter_seasonal_variation, color = "Seasonal Variation"), size = 1) +
+  geom_line(aes(y = quarter_index_sa, color = "Index SA"), size = 1) +
+  geom_line(aes(y = quarter_index_nsa, color = "Index NSA"), size = 1) +
+  labs(
+    title = "Mean Values Across Quarters",
+    x = "Quarter",
+    y = "Mean Values"
+  ) +
+  scale_color_manual(values = c(
+    "Unemployment Rate" = "red",
+    "Seasonal Variation" = "blue",
+    "Index SA" = "green",
+    "Index NSA" = "yellow"
+  )) +
+  theme_minimal()
+```
+
+```{r}
+ggplot(quarter_unrate, aes(x = Quarter)) +
+ 
+  geom_line(aes(y = quarter_index_sa, color = "Index SA"), size = 1) +
+  geom_line(aes(y = quarter_index_nsa, color = "Index NSA"), size = 1) +
+  labs(
+    title = "House Price Index Value Across Quarters",
+    x = "Quarter",
+    y = "Index Values"
+  ) +
+  scale_color_manual(values = c(
+   
+    "Index SA" = "green",
+    "Index NSA" = "yellow"
+  )) +
+  theme_minimal()
+```
+
+```{r}
+ggplot(quarter_unrate, aes(x = Quarter)) +
+  geom_line(aes(y = quarter_unrate, color = "Unemployment Rate"), size = 1) +
+  geom_line(aes(y = quarter_seasonal_variation, color = "Seasonal Variation"), size = 1) +
+ 
+  labs(
+    title = "Mean Unemployment Rata and Seasonal Varitaion Across Quarters",
+    x = "Quarter",
+    y = "Values"
+  ) +
+  scale_color_manual(values = c(
+    "Unemployment Rate" = "red",
+    "Seasonal Variation" = "blue"
+  )) +
+  theme_minimal()
+```
+
+```{r}
+ggplot(quarter_unrate, aes(x = Quarter)) +
+  geom_line(aes(y = quarter_unrate, color = "Unemployment Rate"), size = 1) +
+ 
+  labs(
+    title = "Unemployment Rate Across Quarters",
+    x = "Quarter",
+    y = "Unemployment Rate"
+  ) +
+  scale_color_manual(values = c(
+    "Unemployment Rate" = "red"
+  )) +
+  theme_minimal()
+```
+
+```{r}
+ggplot(quarter_unrate, aes(x = Quarter)) +
+  
+  geom_line(aes(y = quarter_seasonal_variation, color = "Seasonal Variation"), size = 1) +
+ 
+  labs(
+    title = "Seasonal Variation Across Quarters",
+    x = "Quarter",
+    y = "Seasonal Variation"
+  ) +
+  scale_color_manual(values = c(
+    
+    "Seasonal Variation" = "blue"
+  )) +
+  theme_minimal()
+```
+
+```{r}
+# Scatter plot of Unemployment Rate vs Index SA
+ggplot(quarter_unrate, aes(x = quarter_unrate)) +
+  geom_line(aes(y = quarter_index_sa, color = "Season Index"), size = 1) +
+  geom_line(aes(y = quarter_index_nsa, color = "Non-season Index"), size = 1) +
+  labs(
+    title = "Unemployment Rate VS index_sa, index_nsa(quarter)",
+    x = "Unemployment Rate",
+    y = "Values"
+  ) +
+  scale_color_manual(values = c(
+    "Season Index" = "orange",
+    "Non-season Index" = "grey"
+  )) +
+  theme_minimal()
+```
+
+### 2. Data Analysis
+
+```{r}
+# Calculate the correlation matrix
+correlation_matrix <- cor(merged_unRate[, c("Year", "Quarter", "UnEmploymentRate","index_nsa","index_sa")])
+correlation_matrix
+```
+
+```{r}
+# check the relationship between seasons index and non-seasons index of house price
+
+correlation_coefficient <- cor(merged_unRate$index_sa, merged_unRate$index_nsa)
+
+correlation_coefficient
+
+```
+
+Because the correlation coefficient value of 0.999637 between **`index_sa`** and **`index_nsa`** indicates a very strong positive linear relationship between these two variables. In fact, a correlation coefficient close to 1 (either positive or negative) implies a near-perfect linear relationship.
+
+Using Principal Component Analysis (PCA) to remove the redundancy one variable.
+
+PCA is a dimensionality reduction technique that can be used to transform correlated variables into a set of uncorrelated variables (principal components).
+
+```{r}
+pca_result <- prcomp(merged_unRate[, c("index_sa", "index_nsa")])
+merged_unRate$house_price_index <- pca_result$x[, 1]
+head(merged_unRate)
+```
+
+#### 1. Random Forests
+
+```{r}
+set.seed(1234)
+
+#detach("package:randomForest", unload = TRUE)
+merged_unRate_predicted<-merged_unRate%>%
+  select(-c(index_nsa,index_sa,seasnoal_variation))
+
+set.seed(123)  # Set seed for reproducibility
+
+# Create an index for splitting the data (e.g., 80% training, 20% testing)
+index <- createDataPartition(merged_unRate_predicted$house_price_index, p = 0.8, list = FALSE)
+
+# Create training and testing datasets
+train_data <- merged_unRate_predicted[index, ]
+test_data <- merged_unRate_predicted[-index, ]
+
+# Load the randomForest package
+library(randomForest)
+
+# Train the Random Forest model
+rf_model <- randomForest(house_price_index ~ ., data = train_data)
+
+# Make predictions on the testing data
+predictions <- predict(rf_model, newdata = test_data)
+
+# Evaluate the model's performance 
+#mean squared error
+rf_mse <- mean((predictions - test_data$house_price_index)^2) 
+# R squared error
+rf_rsquared <- 1 - sum((test_data$house_price_index - predictions)^2) / sum((test_data$house_price_index - mean(test_data$house_price_index))^2)  
+# Mean Absolute Error
+rf_mae <- mean(abs(predictions - test_data$house_price_index))
+
+
+print(paste("Mean Squared Error:", rf_mse))
+print(paste("R-squared:", rf_rsquared))
+print(paste("Mean Absolute Error:", rf_mae))
+summary(rf_model)
+rf_model$importance
+```
+
+### **Interpretation:**
+
+1.  **Mean Squared Error (MSE):**
+
+    -   MSE is a measure of the average squared difference between predicted values and actual values. More lower MSE values indicate better model performance.
+
+2.  **R-squared (R²):**
+
+    -   R-squared is a measure of how well the model explains the variance in the target variable. An R-squared value of approximately 0.7829 suggests that about 78.29% of the variance in the house price indices is explained by the model.
+
+3.  **Mean Absolute Error (MAE):**
+
+    -   MAE is a measure of the average absolute difference between predicted values and actual values. More lower MAE values indicate better model performance.
+
+#### 2. Support Vector Regression
+
+```{r}
+# Train the support vector regression model
+svm_model <- svm(house_price_index ~ ., data = train_data, kernel = "linear")
+
+# Make predictions on the testing data
+predictions <- predict(svm_model, newdata = test_data)
+
+# Calculate R-squared
+svm_quared <- cor(test_data$house_price_index, predictions)^2
+
+# Calculate Mean Squared Error (MSE)
+svm_mse <- mean((predictions - test_data$house_price_index)^2)
+
+# Calculate Mean Absolute Error (MAE)
+svm_mae <- mean(abs(predictions - test_data$house_price_index))
+
+print(paste("Mean Squared Error:", svm_mse))
+print(paste("R-squared:", svm_quared))
+print(paste("Mean Absolute Error:", svm_mae))
+summary(svm_model)
+```
+
+#### 3. Linear Regression
+
+```{r}
+# Fit linear regression model on the training set
+linear_model <- lm(house_price_index ~ ., data = train_data)
+
+# Make predictions on the testing set
+predicted_prices <- predict(linear_model, newdata = test_data)
+
+# Evaluate model performance
+lr_mse <- mean((predicted_prices - test_data$house_price_index)^2)
+lr_r_squared <- 1 - lr_mse / var(test_data$house_price_index)
+lr_mae <- mean(abs(predicted_prices - test_data$house_price_index))
+#lr_predictions <- predict(linear_model, newdata = test_data)
+
+
+# Print the results
+print(paste("Mean Squared Error:", lr_mse))
+print(paste("R-squared:", lr_r_squared))
+print(paste("Mean Absolute Error:", lr_mae))
+#print(paste("Prediction:",lr_predictions))
+summary(linear_model)
+```
+
+## 5. Conclustion
+
+```{r}
+results_df <- data.frame(
+  Model = c("Linear Regression", "Random Forest", "SVR"),
+  R_Squared = c(lr_r_squared, rf_rsquared, svm_quared),
+  MSE = c(lr_mse, rf_mse, svm_mse),
+  MAE = c(lr_mae, rf_mae, svm_mae)
+)
+results_df
+```
+
+Base on the R squared, the linear regression performs best.
+
+Base on the MSE, the linear regression performs best.
+
+Base on the MAE, the random forest peroforms best.
+
+Overall ,the liner regression model is the most fit our dataset one.
